@@ -31,7 +31,8 @@ int load_elf_file(const char *file, t_elf *elf) {
         return (error(strerror(errno)));
     }
 
-    if (offset < 1 || offset < (off_t)sizeof(Elf64_Ehdr)) {
+    /* un archivo vacío no es un ELF; además mmap(NULL, 0, ...) daría EINVAL */
+    if (offset < 1) {
         close(fd);
         return (error(ENOELF));
     }
@@ -43,14 +44,20 @@ int load_elf_file(const char *file, t_elf *elf) {
         return (error(strerror(errno)));
 
     Elf64_Ehdr *elf_header = addr;
-    if (ft_memcmp(elf_header->e_ident, ELFMAG, SELFMAG) != 0) {
+    /* dominio: solo ejecutables ELF64 cargables (ET_EXEC y PIE); ET_REL/ET_CORE se rechazan */
+
+    if (offset < (off_t)SELFMAG || ft_memcmp(elf_header->e_ident, ELFMAG, SELFMAG) != 0) {
         munmap(elf_header, offset);
         return (error(ENOELF));
-    }
-
-    if (elf_header->e_ident[EI_CLASS] != ELFCLASS64 || elf_header->e_machine != EM_X86_64) {
+    } else if (offset < (off_t)sizeof(Elf64_Ehdr)) {
+        munmap(elf_header, offset);
+        return (error("ELF file too small"));
+    } else if (elf_header->e_ident[EI_CLASS] != ELFCLASS64 || elf_header->e_machine != EM_X86_64) {
         munmap(elf_header, offset);
         return (error(EWRONGARCH));
+    } else if (elf_header->e_type != ET_EXEC && elf_header->e_type != ET_DYN) {
+        munmap(elf_header, offset);
+        return (error("Not an executable ELF (only ET_EXEC / ET_DYN)"));
     }
 
     if (program_headers_are_valid(elf_header, offset) != EXIT_SUCCESS) {
